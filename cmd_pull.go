@@ -40,6 +40,12 @@ top of the file. If no environment name is supplied, the default is
 
 // PullHandler is the handler method for `skeema pull`
 func PullHandler(cfg *mybase.Config) error {
+	// pull has special handling for environments that have partitioning=remove
+	// in an option file, but does not support partitioning on the command-line
+	if cfg.OnCLI("partitioning") {
+		return NewExitValue(CodeBadConfig, "The partitioning option cannot be supplied on the command-line for this command")
+	}
+
 	dir, err := fs.ParseDir(".", cfg)
 	if err != nil {
 		return err
@@ -188,7 +194,11 @@ func pullLogicalSchema(dir *fs.Dir, instance *tengo.Instance, logicalSchema *fs.
 		return nil, NewExitValue(CodeBadConfig, err.Error())
 	}
 	if partitioning, _ := dir.Config.GetEnum("partitioning", "keep", "remove", "modify"); partitioning == "remove" {
-		dumpOpts.RetainPartitioning = true
+		// This is counter-intuitive, but if a .skeema file sets partitioning=remove
+		// for the current environment, we want the dumper to *keep* partitioning
+		// that exists in the *.sql files. This way, users can pull from such an
+		// environment without losing partitioning information from *.sql.
+		dumpOpts.Partitioning = tengo.PartitioningKeep
 	}
 
 	// When --skip-format is in use, we only want to update objects that have

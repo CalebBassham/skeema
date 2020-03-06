@@ -38,6 +38,7 @@ section of the file.`
 	cmd.AddOption(mybase.BoolOption("include-auto-inc", 0, false, "Include starting auto-inc values in table files"))
 	cmd.AddOption(mybase.StringOption("ignore-schema", 0, "", "Ignore schemas that match regex"))
 	cmd.AddOption(mybase.StringOption("ignore-table", 0, "", "Ignore tables that match regex"))
+	cmd.AddOption(mybase.StringOption("partitioning", 0, "keep", `Specify handling of partitioning clauses in generated *.sql files (valid values: "keep", "remove")`))
 	cmd.AddArg("environment", "production", false)
 	CommandSuite.AddSubCommand(cmd)
 }
@@ -238,6 +239,11 @@ func PopulateSchemaDir(s *tengo.Schema, parentDir *fs.Dir, makeSubdir bool) erro
 	dumpOpts.IgnoreTable, err = dir.Config.GetRegexp("ignore-table")
 	if err != nil {
 		return NewExitValue(CodeBadConfig, err.Error())
+	}
+	if partitioning, err := dir.Config.GetEnum("partitioning", "keep", "remove"); err != nil {
+		return NewExitValue(CodeBadConfig, err.Error())
+	} else if partitioning == "remove" {
+		dumpOpts.Partitioning = tengo.PartitioningRemove
 	}
 
 	if _, err = dumper.DumpSchema(s, dir, dumpOpts); err != nil {

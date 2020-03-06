@@ -1413,6 +1413,14 @@ END`
 func (s SkeemaIntegrationSuite) TestPartitioning(t *testing.T) {
 	s.handleCommand(t, CodeSuccess, ".", "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
 
+	// Add an environment that has partitioning=remove, but otherwise is same
+	// as production
+	origDotSkeema := fs.ReadTestFile(t, "mydb/.skeema")
+	newDotSkeema := fmt.Sprintf(
+		"%s\n[dev]\nhost=%s\nport=%d\nflavor=%s\npartitioning=remove\n",
+		origDotSkeema, s.d.Instance.Host, s.d.Instance.Port, s.d.Flavor().Family().String())
+	fs.WriteTestFile(t, "mydb/.skeema", newDotSkeema)
+
 	contentsNoPart := fs.ReadTestFile(t, "mydb/analytics/activity.sql")
 	contents2Part := strings.Replace(contentsNoPart, ";\n",
 		"\nPARTITION BY RANGE (ts)  (PARTITION p0 VALUES LESS THAN (1571678000),\n PARTITION pN VALUES LESS THAN MAXVALUE);\n",
@@ -1434,16 +1442,16 @@ func (s SkeemaIntegrationSuite) TestPartitioning(t *testing.T) {
 	s.handleCommand(t, CodeDifferencesFound, "mydb/analytics", "skeema diff --partitioning=modify")
 	s.handleCommand(t, CodeBadConfig, "mydb/analytics", "skeema diff --partitioning=invalid")
 
-	// At this point we haven't pushed yet, but pull --partitioning=remove should
+	// At this point we haven't pushed yet, but pull dev (partitioning=remove) should
 	// leave the file unchanged, regardless of --format vs --skip-format. Here we're
 	// simulating the situation of fs having partitioning but pulling from a dev
 	// environment which does not.
-	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull --partitioning=remove")
+	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull dev")
 	if newContents := fs.ReadTestFile(t, "mydb/analytics/activity.sql"); newContents != contents2Part {
 		t.Errorf("File contents modified unexpectedly by pull:\n%s", newContents)
 		fs.WriteTestFile(t, "mydb/analytics/activity.sql", contents2Part) // so that subsequent steps proceed normally
 	}
-	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull --partitioning=remove --skip-format")
+	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull --skip-format dev")
 	if newContents := fs.ReadTestFile(t, "mydb/analytics/activity.sql"); newContents != contents2Part {
 		t.Errorf("File contents modified unexpectedly by pull:\n%s", newContents)
 		fs.WriteTestFile(t, "mydb/analytics/activity.sql", contents2Part) // so that subsequent steps proceed normally
@@ -1499,7 +1507,7 @@ func (s SkeemaIntegrationSuite) TestPartitioning(t *testing.T) {
 		t.Errorf("File contents not formatted as expected by pull:\n%s", newContents)
 	}
 	fs.WriteTestFile(t, "mydb/analytics/activity.sql", contentsNoPart)
-	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull --skip-format --partitioning=remove")
+	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull --skip-format dev")
 	if newContents := fs.ReadTestFile(t, "mydb/analytics/activity.sql"); !strings.Contains(newContents, "PARTITION BY RANGE") {
 		t.Errorf("File contents not formatted as expected by pull:\n%s", newContents)
 	}
@@ -1536,9 +1544,11 @@ func (s SkeemaIntegrationSuite) TestPartitioning(t *testing.T) {
 	}
 
 	// Rewrite activity.sql to be partitioned by hash, and then push with remove.
-	// Files should be back to initial state.
+	// Files should be back to initial state, once we un-do the extra environment
+	// added at the beginning of this method
 	fs.WriteTestFile(t, "mydb/analytics/activity.sql", contentsHashPart)
 	s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema push --partitioning=remove")
+	fs.WriteTestFile(t, "mydb/.skeema", origDotSkeema)
 	cfg := s.handleCommand(t, CodeSuccess, "mydb/analytics", "skeema pull")
 	s.verifyFiles(t, cfg, "../golden/init")
 
